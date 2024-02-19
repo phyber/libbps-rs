@@ -7,7 +7,6 @@ use std::io::{
     prelude::*,
     SeekFrom,
 };
-use std::fmt;
 use std::fs::File;
 use std::path::Path;
 
@@ -16,7 +15,6 @@ use crc32::BpsCrc32;
 
 const MAGIC: &[u8; 4] = b"BPS1";
 const MAGIC_SIZE: usize = MAGIC.len();
-const SIZE_OF_U32: usize = std::mem::size_of::<u32>();
 const SIZE_OF_U64: usize = std::mem::size_of::<u64>();
 
 // Header size is dynamic. It consists of:
@@ -33,7 +31,7 @@ const HEADER_BASE_SIZE: usize = MAGIC_SIZE + (SIZE_OF_U64 * 3);
 
 // Footer consists of 3 CRC32 checksums in the order: source, target, bps.
 // Each checksum is 4 bytes each (32bit).
-const FOOTER_SIZE: usize = 12;
+pub const FOOTER_SIZE: usize = 12;
 
 #[derive(Debug)]
 struct BpsHeader {
@@ -156,7 +154,7 @@ impl Bps {
         // Set the BPS position to after the header.
         file.seek(SeekFrom::Start(header.header_size))?;
 
-        let mut bps = Self {
+        let bps = Self {
             file,
             header,
             crc32,
@@ -167,7 +165,7 @@ impl Bps {
     }
 
     fn current_position(&mut self) -> Result<u64, Errors> {
-        let pos = self.file.seek(SeekFrom::Current(0))?;
+        let pos = self.file.stream_position()?;
         Ok(pos)
     }
 

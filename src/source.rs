@@ -27,7 +27,7 @@ impl SourceFile {
     }
 
     pub fn read(&mut self, n: usize) -> Result<Vec<u8>, Errors> {
-        let mut buf: Vec<u8> = Vec::with_capacity(n);
+        let mut buf: Vec<u8> = vec![0; n];
         self.file.read_exact(&mut buf)?;
 
         Ok(buf)

@@ -40,7 +40,7 @@ impl TargetFile {
     }
 
     pub fn write(&mut self, buf: &[u8]) -> Result<(), Errors> {
-        self.file.write(buf)?;
+        self.file.write_all(buf)?;
 
         Ok(())
     }

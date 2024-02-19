@@ -21,6 +21,9 @@ pub enum Errors {
     #[error("bad header")]
     BadHeader,
 
+    #[error("invalid read size")]
+    InvalidReadSize,
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

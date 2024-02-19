@@ -1,19 +1,18 @@
 // Patching routine that will be the main entry point for most users.
 use crate::action::Action;
-use crate::bps::Bps;
+use crate::bps::{
+    Bps,
+    FOOTER_SIZE,
+};
 use crate::source::SourceFile;
 use crate::target::TargetFile;
 use crate::errors::Errors;
-use std::io::{
-    prelude::*,
-    SeekFrom,
-};
-use std::fs::{
-    File,
-    OpenOptions,
-};
+use std::io::SeekFrom;
 use std::path::Path;
 
+// Patcher is responsible for doing the actual patching. It holds all three
+// open files (BPS, source ROM, output). Its `patch` method starts the process
+// of generating the output file.
 #[derive(Debug)]
 pub struct Patcher {
     bps: Bps,
@@ -46,7 +45,7 @@ impl Patcher {
         let mut patch_offset = 0;
 
         // Loop over the patch, performing the given instructions.
-        while patch_offset < (self.bps.patch_size() - 12) {
+        while patch_offset < (self.bps.patch_size() - FOOTER_SIZE as u64) {
             match self.bps.action()? {
                 Action::SourceRead(mut len) => {
                     self.target_file.seek(SeekFrom::Start(output_offset))?;

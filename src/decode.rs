@@ -1,11 +1,9 @@
 //  BPS file wrapper
 use crate::errors::Errors;
-use std::io::{
-    prelude::*,
-    SeekFrom,
-};
+use std::io::prelude::*;
 use std::fs::File;
 
+// This decodes a number from the BPS file
 pub fn varint(f: &mut File) -> Result<u64, Errors> {
     let mut data: u64 = 0;
     let mut shift: u64 = 1;
@@ -25,13 +23,5 @@ pub fn varint(f: &mut File) -> Result<u64, Errors> {
         data += shift;
     }
 
-    println!("{data:?}");
     Ok(data)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const TEST_BPS_PATH: &str = "test-data/Grand_Poo_World_3.bps";
 }

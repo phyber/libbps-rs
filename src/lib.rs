@@ -15,9 +15,3 @@ pub use errors::Errors;
 pub use patcher::Patcher;
 pub use source::SourceFile;
 pub use target::TargetFile;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-}

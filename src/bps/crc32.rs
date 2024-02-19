@@ -1,5 +1,4 @@
 //  BPS file wrapper
-use crate::action::Action;
 use crate::errors::Errors;
 use crc32fast::Hasher;
 use std::io::{
@@ -8,28 +7,9 @@ use std::io::{
 };
 use std::fmt;
 use std::fs::File;
-use std::path::Path;
+use super::FOOTER_SIZE;
 
-const MAGIC: &[u8; 4] = b"BPS1";
-const MAGIC_SIZE: usize = MAGIC.len();
 const SIZE_OF_U32: usize = std::mem::size_of::<u32>();
-const SIZE_OF_U64: usize = std::mem::size_of::<u64>();
-
-// Header size is dynamic. It consists of:
-//  - Magic bytes
-//  - Source ROM size
-//  - Target (output) size
-//  - Metadata size
-//  - Metadata, of the size from the previous components
-//    - This size is dynamic.
-//
-// The final size of the header will be the 3 statically sized components +
-// the dynamic sized metadata.
-const HEADER_BASE_SIZE: usize = MAGIC_SIZE + (SIZE_OF_U64 * 3);
-
-// Footer consists of 3 CRC32 checksums in the order: source, target, bps.
-// Each checksum is 4 bytes each (32bit).
-const FOOTER_SIZE: usize = 12;
 
 #[derive(Debug)]
 pub struct Crc32 {
@@ -144,11 +124,4 @@ impl TryFrom<&mut File> for BpsCrc32 {
 
         Ok(crc32)
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const TEST_BPS_PATH: &str = "test-data/Grand_Poo_World_3.bps";
 }
