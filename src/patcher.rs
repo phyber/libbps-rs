@@ -47,6 +47,7 @@ impl Patcher {
         // Loop over the patch, performing the given instructions.
         while patch_offset < (self.bps.patch_size() - FOOTER_SIZE as u64) {
             match self.bps.action()? {
+                // Copies bytes from the source file to the target file.
                 Action::SourceRead(mut len) => {
                     self.target_file.seek(SeekFrom::Start(output_offset))?;
 
@@ -65,9 +66,20 @@ impl Patcher {
 
                     patch_offset += 1;
                 },
+                // This command treats the entire source file as a dictionary.
+                // An offset supplied to seek the sourceRelativeOffset to the
+                // desired location, and then data is copied from the offset to
+                // the target file.
                 Action::SourceCopy(len) => {
                 },
+                // This command treads all of the data that has already been
+                // written to the target file as a dictionary.
+                //
+                // Data from the targetRelativeOffset will be written to the
+                // target file at the outputOffset.
                 Action::TargetCopy(len) => {
+                    // decode
+                    // targetRelativeOffset = 
                 },
             }
         }

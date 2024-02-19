@@ -1,5 +1,4 @@
 //  BPS file wrapper
-use crate::action::Action;
 use crate::errors::Errors;
 use crc32fast::Hasher;
 use std::io::{
@@ -8,235 +7,121 @@ use std::io::{
 };
 use std::fmt;
 use std::fs::File;
-use std::path::Path;
+use super::FOOTER_SIZE;
 
-mod crc32;
-use crc32::BpsCrc32;
-
-const MAGIC: &[u8; 4] = b"BPS1";
-const MAGIC_SIZE: usize = MAGIC.len();
 const SIZE_OF_U32: usize = std::mem::size_of::<u32>();
-const SIZE_OF_U64: usize = std::mem::size_of::<u64>();
-
-// Header size is dynamic. It consists of:
-//  - Magic bytes
-//  - Source ROM size
-//  - Target (output) size
-//  - Metadata size
-//  - Metadata, of the size from the previous components
-//    - This size is dynamic.
-//
-// The final size of the header will be the 3 statically sized components +
-// the dynamic sized metadata.
-const HEADER_BASE_SIZE: usize = MAGIC_SIZE + (SIZE_OF_U64 * 3);
-
-// Footer consists of 3 CRC32 checksums in the order: source, target, bps.
-// Each checksum is 4 bytes each (32bit).
-const FOOTER_SIZE: usize = 12;
-
-fn decode_varint(f: &mut File) -> Result<u64, Errors> {
-    let mut data: u64 = 0;
-    let mut shift: u64 = 1;
-    let mut buf: [u8; 1] = [0; 1];
-
-    loop {
-        f.read_exact(&mut buf)?;
-        let x = u64::from(buf[0]);
-
-        data += (x & 0x7f) * shift;
-
-        if x & 0x80 != 0 {
-            break;
-        }
-
-        shift <<= 7;
-        data += shift;
-    }
-
-    println!("{data:?}");
-    Ok(data)
-}
 
 #[derive(Debug)]
-struct BpsHeader {
-    source_size: u64,
-    target_size: u64,
-    metadata_size: u64,
-    header_size: u64,
+pub struct Crc32 {
+    crc32: u32,
 }
 
-impl BpsHeader {
-    // Checks that the header is correct
-    fn magic_check(f: &mut File) -> Result<(), Errors> {
-        let mut buf: [u8; MAGIC_SIZE] = [0; MAGIC_SIZE];
-
-        f.seek(SeekFrom::Start(0))?;
-        f.read_exact(&mut buf)?;
-
-        if &buf != MAGIC {
-            return Err(Errors::BadHeader);
+impl Crc32 {
+    fn new(crc32: u32) -> Self {
+        Self {
+            crc32,
         }
+   }
 
-        Ok(())
-    }
-
-    fn source_size(&self) -> u64 {
-        self.source_size
-    }
-
-    fn target_size(&self) -> u64 {
-        self.target_size
-    }
-}
-
-impl TryFrom<&mut File> for BpsHeader {
-    type Error = Errors;
-
-    fn try_from(file: &mut File) -> Result<Self, Self::Error> {
-        Self::magic_check(file)?;
-
-        let mut header_size: u64 = HEADER_BASE_SIZE as u64;
-
-        let source_size = decode_varint(file)?;
-        let target_size = decode_varint(file)?;
-        let metadata_size = decode_varint(file)?;
-
-        // Skip over metadata
-        if metadata_size > 0 {
-            file.seek(SeekFrom::Current(metadata_size as i64))?;
-            header_size += metadata_size;
-        }
-
-        let header = BpsHeader {
-            source_size,
-            target_size,
-            metadata_size,
-            header_size,
-        };
-
-        Ok(header)
-    }
-}
-
-#[derive(Debug)]
-pub struct Bps {
-    file: File,
-    header: BpsHeader,
-    crc32: BpsCrc32,
-    patch_size: u64,
-}
-
-impl Bps {
-    pub fn new<P>(path: &P) -> Result<Self, Errors>
-    where
-        P: AsRef<Path> + ?Sized,
-    {
-        let mut file = File::open(path)?;
-        let patch_size = file.metadata()?.len();
-        let crc32 = BpsCrc32::try_from(&mut file)?;
-
-        // We can now check the CRC32 of the BPS file.
-        let mut hasher = Hasher::new();
+    // Compare the Crc32 against the File
+    pub fn compare(&self, file: &mut File) -> Result<(), Errors> {
         let mut buf: [u8; 32 * 1_024] = [0; 32 * 1_024];
-        let mut total_read = 0;
-        file.seek(SeekFrom::Start(0))?;
+        let mut hasher = Hasher::new();
 
         loop {
             match file.read(&mut buf)? {
                 0 => break,
-                mut n => {
-                    // The CRC for the BPS file is the sum of all bytes, except
-                    // for the last 4.
-                    // This is probably a really bad way of achieving this and
-                    // I expect that there are times this would break.
-                    total_read += n as u64;
-
-                    if total_read == patch_size {
-                        n -= 4;
-                    }
-
-                    hasher.update(&buf[..n]);
-                },
+                n => hasher.update(&buf[..n]),
             }
         }
 
         let hash = hasher.finalize();
 
-        if hash != crc32.bps() {
-            println!(
-                "{} != {}",
-                hex::encode(hash.to_le_bytes()),
-                hex::encode(crc32.bps().to_le_bytes()),
-            );
-            println!("{hash} != {}", crc32.bps());
-            return Err(Errors::BadCrc32Bps);
+        if hash != self.crc32 {
+            return Err(Errors::BadCrc32);
         }
 
-        // Now that we know the CRC32 is good, read the header.
-        let header = BpsHeader::try_from(&mut file)?;
-
-        // Set the BPS position to after the header.
-        file.seek(SeekFrom::Start(header.header_size))?;
-
-        let mut bps = Self {
-            file,
-            header,
-            crc32,
-            patch_size,
-        };
-
-        Ok(bps)
-    }
-
-    fn current_position(&mut self) -> Result<u64, Errors> {
-        let pos = self.file.seek(SeekFrom::Current(0))?;
-        Ok(pos)
-    }
-
-    // Returns the next action, advancing the BPS file position.
-    pub fn action(&mut self) -> Result<Action, Errors> {
-        let instruction = decode_varint(&mut self.file)?;
-        let action = Action::from(instruction);
-
-        Ok(action)
-    }
-
-    pub fn patch_size(&self) -> u64 {
-        self.patch_size
-    }
-
-    pub fn read_len_at(
-        &mut self,
-        n: usize,
-        seek: SeekFrom,
-    ) -> Result<Vec<u8>, Errors> {
-        let mut bytes: Vec<u8> = Vec::with_capacity(n);
-        self.file.seek(seek)?;
-        self.file.read_exact(&mut bytes)?;
-
-        Ok(bytes)
+        Ok(())
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub struct BpsCrc32 {
+    bps: u32,
+    source: u32,
+    target: u32,
+}
 
-    const TEST_BPS_PATH: &str = "test-data/Grand_Poo_World_3.bps";
-
-    #[test]
-    fn test_header_check() {
-        let mut file = File::open(TEST_BPS_PATH).unwrap();
-        let check = BpsHeader::magic_check(&mut file);
-
-        assert!(check.is_ok());
+impl BpsCrc32 {
+    pub fn bps(&self) -> u32 {
+        self.bps
     }
 
-    #[test]
-    fn test_header_content() {
-        let mut file = File::open(TEST_BPS_PATH).unwrap();
-        let header = BpsHeader::try_from(&mut file).unwrap();
+    pub fn source(&self) -> u32 {
+        self.source
+    }
 
-        println!("{header:?}");
+    pub fn target(&self) -> u32 {
+        self.target
+    }
+}
+
+impl fmt::Debug for BpsCrc32 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("BpsCrc32")
+            .field("bps", &hex::encode(self.bps.to_le_bytes()))
+            .field("source", &hex::encode(self.source.to_le_bytes()))
+            .field("target", &hex::encode(self.target.to_le_bytes()))
+            .finish()
+    }
+}
+
+impl fmt::Display for BpsCrc32 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "BPS: {}, ROM: {}, TARGET: {}",
+            hex::encode(self.bps.to_le_bytes()),
+            hex::encode(self.source.to_le_bytes()),
+            hex::encode(self.target.to_le_bytes()),
+        )
+    }
+}
+
+impl TryFrom<&mut File> for BpsCrc32 {
+    type Error = Errors;
+
+    fn try_from(file: &mut File) -> Result<Self, Self::Error> {
+        let file_size = file.metadata()?.len();
+
+        if file_size < FOOTER_SIZE as u64 {
+            return Err(Errors::BadBps);
+        }
+
+        // Reach each set of bytes into the buffer individually, before casting
+        // to u32.
+        // We could read the entire footer at the same time, but this avoids
+        // having to use a try_from to get the type that from_le_bytes expects.
+        let footer_position = file_size - FOOTER_SIZE as u64;
+        let mut buf: [u8; SIZE_OF_U32] = [0; SIZE_OF_U32];
+        file.seek(SeekFrom::Start(footer_position))?;
+
+        file.read_exact(&mut buf)?;
+        let source = u32::from_le_bytes(buf);
+
+        file.read_exact(&mut buf)?;
+        let target = u32::from_le_bytes(buf);
+
+        file.read_exact(&mut buf)?;
+        let bps = u32::from_le_bytes(buf);
+
+        let crc32 = Self {
+            bps,
+            source,
+            target,
+        };
+
+        println!("{crc32}");
+
+        Ok(crc32)
     }
 }
